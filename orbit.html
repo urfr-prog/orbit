@@ -1,0 +1,474 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ADAM Grid — v5 · 3D Icons</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            background: #0c0d14; min-height: 100vh;
+            display: flex; flex-direction: column;
+            justify-content: center; align-items: center;
+            font-family: 'Courier New', monospace;
+            overflow: hidden; user-select: none;
+        }
+        canvas { display: block; touch-action: none; cursor: pointer; }
+        .hud { display: flex; gap: 12px; margin-top: 14px; align-items: center; }
+        .dbtn {
+            background: transparent;
+            border: 1px solid rgba(126,200,227,0.2);
+            color: rgba(126,200,227,0.35);
+            padding: 4px 11px; border-radius: 6px;
+            cursor: pointer; font-size: 0.55rem; font-family: inherit;
+        }
+        .dbtn:hover { border-color: rgba(126,200,227,0.45); color: rgba(126,200,227,0.6); }
+        .info {
+            color: rgba(126,200,227,0.25); font-size: 0.5rem;
+            letter-spacing: 0.08em;
+        }
+    </style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div class="hud">
+    <button class="dbtn" id="btnReset">reset</button>
+    <span class="info">tap = grossir · swipe = tourner 90°</span>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+
+// ═══ 3D ICON BUILDERS ═══
+// Chaque fonction retourne un THREE.Group de lignes/mesh 3D
+// Taille normalisée dans [-0.4, 0.4]
+
+const EXTRUDE_DEPTH = 0.08;
+const TUBE_RADIUS = 0.018;
+const TUBE_SEGMENTS = 6;
+
+function makeTube(points, color, radius) {
+    const r = radius || TUBE_RADIUS;
+    if (points.length < 2) return new THREE.Group();
+    const curve = new THREE.CatmullRomCurve3(points, false, 'catmullrom', 0.01);
+    const geo = new THREE.TubeGeometry(curve, Math.max(8, points.length * 6), r, TUBE_SEGMENTS, false);
+    const mat = new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: 0.5, transparent: true, opacity: 0.9 });
+    return new THREE.Mesh(geo, mat);
+}
+
+function makeRing(cx, cy, cz, radius, color, tubeR) {
+    const geo = new THREE.TorusGeometry(radius, tubeR || TUBE_RADIUS, TUBE_SEGMENTS, 32);
+    const mat = new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: 0.5, transparent: true, opacity: 0.9 });
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.position.set(cx, cy, cz);
+    return mesh;
+}
+
+function makeDot(cx, cy, cz, radius, color) {
+    const geo = new THREE.SphereGeometry(radius, 12, 12);
+    const mat = new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: 0.6, transparent: true, opacity: 0.9 });
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.position.set(cx, cy, cz);
+    return mesh;
+}
+
+// ═══ ICON BUILDERS ═══
+
+function buildIcon3D(iconIdx, color) {
+    const g = new THREE.Group();
+    const S = 0.35; // scale factor
+
+    switch(iconIdx) {
+        case 0: { // chevronUp
+            const pts = [new THREE.Vector3(-S, -S*0.4, 0), new THREE.Vector3(0, S*0.4, 0), new THREE.Vector3(S, -S*0.4, 0)];
+            g.add(makeTube(pts, color)); break;
+        }
+        case 1: { // chevronDown
+            const pts = [new THREE.Vector3(-S, S*0.4, 0), new THREE.Vector3(0, -S*0.4, 0), new THREE.Vector3(S, S*0.4, 0)];
+            g.add(makeTube(pts, color)); break;
+        }
+        case 2: { // circle
+            g.add(makeRing(0, 0, 0, S*0.55, color)); break;
+        }
+        case 3: { // twoCircles
+            g.add(makeRing(-S*0.45, 0, 0, S*0.35, color));
+            g.add(makeRing(S*0.45, 0, 0, S*0.35, color)); break;
+        }
+        case 4: { // line
+            const pts = [new THREE.Vector3(-S, 0, 0), new THREE.Vector3(S, 0, 0)];
+            g.add(makeTube(pts, color)); break;
+        }
+        case 5: { // threeLines
+            for (let i = -1; i <= 1; i++) {
+                const pts = [new THREE.Vector3(i*S*0.4, -S*0.8, 0), new THREE.Vector3(i*S*0.4, S*0.8, 0)];
+                g.add(makeTube(pts, color));
+            }
+            break;
+        }
+        case 6: { // twoPoints
+            g.add(makeDot(-S*0.45, 0, 0, TUBE_RADIUS*2.5, color));
+            g.add(makeDot(S*0.45, 0, 0, TUBE_RADIUS*2.5, color)); break;
+        }
+        case 7: { // threePoints
+            g.add(makeDot(0, -S*0.4, 0, TUBE_RADIUS*2.5, color));
+            g.add(makeDot(-S*0.45, S*0.35, 0, TUBE_RADIUS*2.5, color));
+            g.add(makeDot(S*0.45, S*0.35, 0, TUBE_RADIUS*2.5, color)); break;
+        }
+        case 8: { // waveUp
+            const pts = [];
+            for (let t = 0; t <= 1; t += 0.05) {
+                const x = -S + t * 2 * S;
+                const y = Math.sin(t * Math.PI * 2) * S * 0.4;
+                pts.push(new THREE.Vector3(x, y, 0));
+            }
+            g.add(makeTube(pts, color)); break;
+        }
+        case 9: { // waveDown
+            const pts = [];
+            for (let t = 0; t <= 1; t += 0.05) {
+                const x = -S + t * 2 * S;
+                const y = -Math.sin(t * Math.PI * 2) * S * 0.4;
+                pts.push(new THREE.Vector3(x, y, 0));
+            }
+            g.add(makeTube(pts, color)); break;
+        }
+        case 10: { // twoL
+            const pts1 = [new THREE.Vector3(-S*0.5, -S*0.6, 0), new THREE.Vector3(-S*0.5, S*0.3, 0), new THREE.Vector3(S*0.05, S*0.3, 0)];
+            const pts2 = [new THREE.Vector3(S*0.5, -S*0.6, 0), new THREE.Vector3(S*0.5, S*0.3, 0), new THREE.Vector3(-S*0.05, S*0.3, 0)];
+            g.add(makeTube(pts1, color));
+            g.add(makeTube(pts2, color)); break;
+        }
+        case 11: { // arc
+            const pts = [];
+            for (let t = 0; t <= 1; t += 0.05) {
+                const angle = Math.PI * t;
+                const x = Math.cos(angle) * S * 0.7;
+                const y = Math.sin(angle) * S * 0.5 - S * 0.1;
+                pts.push(new THREE.Vector3(x, y, 0));
+            }
+            g.add(makeTube(pts, color)); break;
+        }
+        case 12: { // twoSquares
+            const sq = (ox) => {
+                const d = S * 0.22;
+                return [
+                    new THREE.Vector3(ox-d, -d, 0), new THREE.Vector3(ox+d, -d, 0),
+                    new THREE.Vector3(ox+d, d, 0), new THREE.Vector3(ox-d, d, 0),
+                    new THREE.Vector3(ox-d, -d, 0)
+                ];
+            };
+            g.add(makeTube(sq(-S*0.35), color));
+            g.add(makeTube(sq(S*0.35), color)); break;
+        }
+        case 13: { // target
+            g.add(makeRing(0, 0, 0, S*0.55, color));
+            g.add(makeDot(0, 0, 0, TUBE_RADIUS*3, color)); break;
+        }
+        case 14: { // dumbbell
+            g.add(makeRing(-S*0.5, 0, 0, S*0.22, color));
+            g.add(makeRing(S*0.5, 0, 0, S*0.22, color));
+            g.add(makeTube([new THREE.Vector3(-S*0.28, 0, 0), new THREE.Vector3(S*0.28, 0, 0)], color)); break;
+        }
+        case 15: { // singleLine vertical
+            g.add(makeTube([new THREE.Vector3(0, -S*0.7, 0), new THREE.Vector3(0, S*0.7, 0)], color)); break;
+        }
+        case 16: { // singlePoint
+            g.add(makeDot(0, 0, 0, TUBE_RADIUS*3.5, color)); break;
+        }
+        case 17: { // diamond
+            const pts = [
+                new THREE.Vector3(0, -S*0.6, 0), new THREE.Vector3(S*0.4, 0, 0),
+                new THREE.Vector3(0, S*0.6, 0), new THREE.Vector3(-S*0.4, 0, 0),
+                new THREE.Vector3(0, -S*0.6, 0)
+            ];
+            g.add(makeTube(pts, color)); break;
+        }
+    }
+    return g;
+}
+
+// ═══ COULEURS ═══
+
+const ICON_COLORS = {
+    0: 0x7ec8e3, 1: 0x7ec8e3, 2: 0x22d3ee, 3: 0x22d3ee,
+    4: 0x7ec8e3, 5: 0xc4b5fd, 7: 0xc4b5fd,
+    8: 0x34d399, 9: 0x34d399, 11: 0xffd700, 13: 0xff78b4,
+    14: 0x7ec8e3, 17: 0xffeb3b, 10: 0x7ec8e3, 12: 0x22d3ee,
+    15: 0x7ec8e3, 16: 0xc4b5fd, 6: 0xc4b5fd,
+};
+
+function iconColor(idx) { return ICON_COLORS[idx] || 0x7ec8e3; }
+
+// ═══ GRILLE ═══
+
+const GRID_DATA = [
+    [0,  2],  [13, 17], [8,  5],
+    [17, 11], [2,  13], [5,  0],
+    [11, 8],  [17, 2],  [13, 9],
+];
+
+const STEP_3D = 1.6;
+const SIZE_MIN = 0.3;
+const SIZE_MAX = 1.8;
+const SIZE_DEFAULT = 1.0;
+const ANIM_SPEED = 5.0;
+
+// ═══ STATE ═══
+
+let cells = [];
+
+// ═══ THREE SETUP ═══
+
+const W = Math.min(window.innerWidth, 500);
+const canvas = document.getElementById('c');
+canvas.style.width = W + 'px'; canvas.style.height = W + 'px';
+
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+renderer.setSize(W, W);
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.setClearColor(0x0c0d14);
+
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(35, 1, 0.1, 100);
+camera.position.set(0, 0, 10);
+camera.lookAt(0, 0, 0);
+
+// Éclairage
+scene.add(new THREE.AmbientLight(0xffffff, 0.4));
+const dirLight = new THREE.DirectionalLight(0xffffff, 0.6);
+dirLight.position.set(3, 4, 8);
+scene.add(dirLight);
+const backLight = new THREE.DirectionalLight(0x4488cc, 0.3);
+backLight.position.set(-3, -2, -5);
+scene.add(backLight);
+
+const gridGroup = new THREE.Group();
+scene.add(gridGroup);
+
+const raycaster = new THREE.Raycaster();
+const mouse = new THREE.Vector2();
+
+// ═══ HELPERS ═══
+
+function cellPos(idx) {
+    const gx = idx % 3, gy = Math.floor(idx / 3);
+    return { x: (gx - 1) * STEP_3D, y: -(gy - 1) * STEP_3D };
+}
+
+function getNeighbors(idx) {
+    const r = Math.floor(idx / 3), c = idx % 3, n = [];
+    if (r > 0) n.push(idx - 3);
+    if (r < 2) n.push(idx + 3);
+    if (c > 0) n.push(idx - 1);
+    if (c < 2) n.push(idx + 1);
+    return n;
+}
+
+// ═══ BUILD ═══
+
+function buildGrid() {
+    while (gridGroup.children.length) gridGroup.remove(gridGroup.children[0]);
+    cells = [];
+
+    GRID_DATA.forEach((pair, i) => {
+        const pos = cellPos(i);
+        const color1 = iconColor(pair[0]);
+        const color2 = iconColor(pair[1]);
+
+        // Groupe pivot (position dans la grille)
+        const pivot = new THREE.Group();
+        pivot.position.set(pos.x, pos.y, 0);
+
+        // Groupe rotatif (pour les crans de 90°)
+        const rotGroup = new THREE.Group();
+        pivot.add(rotGroup);
+
+        // Icône AVANT (face caméra, z positif)
+        const frontIcon = buildIcon3D(pair[0], color1);
+        frontIcon.position.z = EXTRUDE_DEPTH + 0.02;
+        rotGroup.add(frontIcon);
+
+        // Icône ARRIÈRE (dos, z négatif, miroir)
+        const backIcon = buildIcon3D(pair[1], color2);
+        backIcon.position.z = -(EXTRUDE_DEPTH + 0.02);
+        backIcon.rotation.y = Math.PI; // miroir pour qu'on la voie correctement de dos
+        backIcon.traverse(child => {
+            if (child.material) {
+                child.material = child.material.clone();
+                child.material.opacity = 0.35;
+            }
+        });
+        rotGroup.add(backIcon);
+
+        // Médiane subtile (fine ligne horizontale entre les deux)
+        const medGeo = new THREE.TubeGeometry(
+            new THREE.CatmullRomCurve3([new THREE.Vector3(-0.25, 0, 0), new THREE.Vector3(0.25, 0, 0)], false, 'catmullrom', 0.01),
+            4, 0.005, 4, false
+        );
+        const medMat = new THREE.MeshBasicMaterial({ color: color1, transparent: true, opacity: 0.15 });
+        const medLine = new THREE.Mesh(medGeo, medMat);
+        medLine.position.z = EXTRUDE_DEPTH + 0.025;
+        rotGroup.add(medLine);
+
+        // Hitbox invisible
+        const hitbox = new THREE.Mesh(
+            new THREE.PlaneGeometry(1.2, 1.2),
+            new THREE.MeshBasicMaterial({ visible: false })
+        );
+        hitbox.position.z = 0.1;
+        hitbox.userData.cellIdx = i;
+        pivot.add(hitbox);
+
+        const cellData = {
+            idx: i,
+            front: pair[0],
+            back: pair[1],
+            pivot,
+            rotGroup,
+            hitbox,
+            currentSize: SIZE_DEFAULT,
+            targetSize: SIZE_DEFAULT,
+            // Rotation state
+            currentRotY: 0,
+            targetRotY: 0,
+            rotating: false,
+        };
+
+        cells.push(cellData);
+        gridGroup.add(pivot);
+    });
+}
+
+// ═══ TAP & SWIPE ═══
+
+let touchStartX = 0, touchStartY = 0, touchStartTime = 0;
+let touchedCell = null;
+
+function getCellFromEvent(event) {
+    const rect = canvas.getBoundingClientRect();
+    const cx = event.clientX !== undefined ? event.clientX : event.touches[0].clientX;
+    const cy = event.clientY !== undefined ? event.clientY : event.touches[0].clientY;
+    mouse.x = ((cx - rect.left) / rect.width) * 2 - 1;
+    mouse.y = -((cy - rect.top) / rect.height) * 2 + 1;
+    raycaster.setFromCamera(mouse, camera);
+    const hitboxes = cells.map(c => c.hitbox);
+    const hits = raycaster.intersectObjects(hitboxes);
+    if (hits.length > 0) return cells[hits[0].object.userData.cellIdx];
+    return null;
+}
+
+function onPointerDown(event) {
+    event.preventDefault();
+    const cx = event.clientX !== undefined ? event.clientX : event.touches[0].clientX;
+    const cy = event.clientY !== undefined ? event.clientY : event.touches[0].clientY;
+    touchStartX = cx;
+    touchStartY = cy;
+    touchStartTime = performance.now();
+    touchedCell = getCellFromEvent(event);
+}
+
+function onPointerUp(event) {
+    event.preventDefault();
+    if (!touchedCell) return;
+
+    const cx = event.clientX !== undefined ? event.clientX : event.changedTouches[0].clientX;
+    const cy = event.clientY !== undefined ? event.clientY : event.changedTouches[0].clientY;
+    const dx = cx - touchStartX;
+    const dy = cy - touchStartY;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    const elapsed = performance.now() - touchStartTime;
+
+    const cell = touchedCell;
+    touchedCell = null;
+
+    if (dist < 15 && elapsed < 400) {
+        // TAP → grossit + voisins rétrécissent
+        cell.targetSize = Math.min(SIZE_MAX, cell.targetSize + 0.3);
+        getNeighbors(cell.idx).forEach(nIdx => {
+            cells[nIdx].targetSize = Math.max(SIZE_MIN, cells[nIdx].targetSize - 0.2);
+        });
+    } else if (dist > 30 && Math.abs(dx) > Math.abs(dy)) {
+        // SWIPE horizontal → rotation 90° sur Y
+        const dir = dx > 0 ? 1 : -1;
+        cell.targetRotY += dir * Math.PI / 2;
+        cell.rotating = true;
+    }
+}
+
+canvas.addEventListener('mousedown', onPointerDown);
+canvas.addEventListener('mouseup', onPointerUp);
+canvas.addEventListener('touchstart', onPointerDown, { passive: false });
+canvas.addEventListener('touchend', onPointerUp, { passive: false });
+
+// ═══ RESET ═══
+
+document.getElementById('btnReset').addEventListener('click', () => {
+    cells.forEach(c => {
+        c.targetSize = SIZE_DEFAULT;
+        c.targetRotY = 0;
+    });
+});
+
+// ═══ ANIMATION ═══
+
+let lastTime = performance.now();
+
+function animate() {
+    requestAnimationFrame(animate);
+    const now = performance.now();
+    const dt = (now - lastTime) / 1000;
+    lastTime = now;
+    const t = now * 0.001;
+
+    cells.forEach((cell, i) => {
+        // Lerp taille
+        cell.currentSize += (cell.targetSize - cell.currentSize) * Math.min(1, dt * ANIM_SPEED);
+
+        // Lerp rotation Y
+        cell.currentRotY += (cell.targetRotY - cell.currentRotY) * Math.min(1, dt * 8);
+        if (Math.abs(cell.targetRotY - cell.currentRotY) < 0.01) {
+            cell.currentRotY = cell.targetRotY;
+            cell.rotating = false;
+        }
+        cell.rotGroup.rotation.y = cell.currentRotY;
+
+        // Breathing
+        const breath = 1.0 + Math.sin(t * 1.5 + i * 0.9) * 0.012;
+        const s = cell.currentSize * breath;
+        cell.pivot.scale.set(s, s, s);
+
+        // Opacité liée à la taille
+        const norm = (cell.currentSize - SIZE_MIN) / (SIZE_MAX - SIZE_MIN);
+        const opacity = 0.25 + norm * 0.75;
+        cell.rotGroup.traverse(child => {
+            if (child.material && child.material.opacity !== undefined) {
+                // Garder le ratio pour les éléments déjà semi-transparents
+                const baseOp = child.material.userData?.baseOpacity;
+                if (baseOp !== undefined) {
+                    child.material.opacity = baseOp * opacity;
+                }
+            }
+        });
+    });
+
+    renderer.render(scene, camera);
+}
+
+// ═══ RESIZE ═══
+
+window.addEventListener('resize', () => {
+    const w = Math.min(window.innerWidth, 500);
+    canvas.style.width = w + 'px'; canvas.style.height = w + 'px';
+    renderer.setSize(w, w);
+    camera.aspect = 1;
+    camera.updateProjectionMatrix();
+});
+
+// ═══ START ═══
+
+buildGrid();
+animate();
+
+</script>
+</body>
+</html>
