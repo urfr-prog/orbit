@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>Fusion Square — Swipe Colonnes</title>
+<title>Fusion Square — Dominos v2</title>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
 html,body{height:100%;overflow:hidden;touch-action:none}
@@ -17,401 +17,378 @@ canvas{width:100vw;height:100vh;display:block}
 <div class="hint">SWIPE 8 DIRECTIONS ↗ → ↘ ↓ ↙ ← ↖ ↑</div>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script>
+// ══════════════════════════════════════
+//  ADAM DOMINO SYSTEM
+// ══════════════════════════════════════
+const BANK=['chevron','circle','twoCircles','line','threeLines','twoPoints','square','wave'];
+const STATE_ORDER=['white','silver','gold','emerald','cosmic','supernovae'];
+const ICO={
+ chevron:{f1:'M20 32L45 12L70 32',f2:'M20 12L45 32L70 12',t:'path'},
+ circle:{f1:'45,22,12',f2:'45,22,12',t:'circle'},
+ twoCircles:{f1:'30,22,8|60,22,8',f2:'30,22,8|60,22,8',t:'circles'},
+ line:{f1:'15,22,75,22',f2:'15,22,75,22',t:'line'},
+ threeLines:{f1:'25,10,25,34|45,10,45,34|65,10,65,34',f2:'25,10,25,34|45,10,45,34|65,10,65,34',t:'lines'},
+ twoPoints:{f1:'30,22,4|60,22,4',f2:'30,22,4|60,22,4',t:'points'},
+ square:{f1:'25,10,40,24,3',f2:'25,10,40,24,3',t:'rect'},
+ wave:{f1:'M10 22Q28 6 45 22Q62 38 80 22',f2:'M10 22Q28 6 45 22Q62 38 80 22',t:'path'}
+};
+function renderIcoSVG(name,f2){
+ const d=ICO[name];if(!d)return'';const data=f2?d.f2:d.f1;
+ if(d.t==='path')return`<path class="i" d="${data}"/>`;
+ if(d.t==='circle'){const[cx,cy,r]=data.split(',');return`<circle class="i" cx="${cx}" cy="${cy}" r="${r}"/>`;}
+ if(d.t==='line'){const[x1,y1,x2,y2]=data.split(',');return`<line class="i" x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}"/>`;}
+ if(d.t==='rect'){const[x,y,w,h,rx]=data.split(',');return`<rect class="i" x="${x}" y="${y}" width="${w}" height="${h}" rx="${rx}"/>`;}
+ return data.split('|').map(p=>{const v=p.split(',');
+  if(d.t==='circles')return`<circle class="i" cx="${v[0]}" cy="${v[1]}" r="${v[2]}"/>`;
+  if(d.t==='points')return`<circle class="p" cx="${v[0]}" cy="${v[1]}" r="${v[2]}"/>`;
+  return`<line class="i" x1="${v[0]}" y1="${v[1]}" x2="${v[2]}" y2="${v[3]}"/>`;
+ }).join('');
+}
+const STC={
+ white:{border:'rgba(180,180,190,0.35)',icon:'rgba(180,180,190,0.35)',pt:'rgba(180,180,190,0.35)',sep:'rgba(180,180,190,0.3)',flt:'',bw:1},
+ silver:{border:'rgba(6,182,212,0.6)',icon:'#22d3ee',pt:'#22d3ee',sep:'rgba(34,211,238,0.4)',flt:'drop-shadow(0 0 2px rgba(34,211,238,0.4))',bw:1},
+ gold:{border:'rgba(255,215,0,0.7)',icon:'#ffd700',pt:'#ffd700',sep:'rgba(255,215,0,0.4)',flt:'drop-shadow(0 0 4px rgba(255,215,0,0.6))',bw:1},
+ emerald:{border:'rgba(52,211,153,0.9)',icon:'#34d399',pt:'#34d399',sep:'rgba(52,211,153,0.6)',flt:'drop-shadow(0 0 6px rgba(52,211,153,0.9))',bw:1},
+ cosmic:{border:'rgba(131,56,236,0.7)',icon:'#c4b5fd',pt:'#c4b5fd',sep:'rgba(196,181,253,0.6)',flt:'drop-shadow(0 0 6px rgba(131,56,236,0.7))',bw:2},
+ supernovae:{border:'rgba(255,140,0,0.7)',icon:'#ffeb3b',pt:'#ffeb3b',sep:'rgba(255,235,59,0.6)',flt:'drop-shadow(0 0 6px rgba(255,215,0,0.7))',bw:3}
+};
+const _tc={};
+function getDominoTex(f1,f2,rot,state){
+ const k=f1+'|'+f2+'|'+rot+'|'+state;if(_tc[k])return _tc[k];
+ const c=STC[state]||STC.white,r=((rot||0)%360+360)%360;
+ const top=renderIcoSVG(f1,false),bot=renderIcoSVG(f2,true);
+ const svg=`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 90 90">
+  <style>.i{stroke:${c.icon};stroke-width:2;stroke-linecap:round;stroke-linejoin:round;fill:none;${c.flt?'filter:'+c.flt:''}}.p{fill:${c.pt};${c.flt?'filter:'+c.flt:''}}.s{stroke:${c.sep};stroke-width:1}</style>
+  <g transform="rotate(${r},45,45)"><line class="s" x1="0" y1="45" x2="90" y2="45"/><g>${top}</g><g transform="translate(0,45)">${bot}</g></g></svg>`;
+ const S=256,cv=document.createElement('canvas');cv.width=S;cv.height=S;
+ const ctx=cv.getContext('2d');
+ const tex=new THREE.CanvasTexture(cv);tex.needsUpdate=false;
+ const blob=new Blob([svg],{type:'image/svg+xml;charset=utf-8'});
+ const url=URL.createObjectURL(blob);
+ const img=new Image();
+ img.onload=()=>{
+  const m=4,rd=36;
+  ctx.fillStyle='rgba(18,19,26,0.95)';
+  ctx.beginPath();ctx.moveTo(m+rd,m);ctx.lineTo(S-m-rd,m);ctx.quadraticCurveTo(S-m,m,S-m,m+rd);ctx.lineTo(S-m,S-m-rd);ctx.quadraticCurveTo(S-m,S-m,S-m-rd,S-m);ctx.lineTo(m+rd,S-m);ctx.quadraticCurveTo(m,S-m,m,S-m-rd);ctx.lineTo(m,m+rd);ctx.quadraticCurveTo(m,m,m+rd,m);ctx.closePath();ctx.fill();
+  ctx.strokeStyle=c.border;ctx.lineWidth=c.bw;
+  ctx.beginPath();ctx.moveTo(m+rd,m);ctx.lineTo(S-m-rd,m);ctx.quadraticCurveTo(S-m,m,S-m,m+rd);ctx.lineTo(S-m,S-m-rd);ctx.quadraticCurveTo(S-m,S-m,S-m-rd,S-m);ctx.lineTo(m+rd,S-m);ctx.quadraticCurveTo(m,S-m,m,S-m-rd);ctx.lineTo(m,m+rd);ctx.quadraticCurveTo(m,m,m+rd,m);ctx.closePath();ctx.stroke();
+  ctx.drawImage(img,m+2,m+2,S-m*2-4,S-m*2-4);
+  tex.needsUpdate=true;URL.revokeObjectURL(url);
+ };
+ img.src=url;_tc[k]=tex;return tex;
+}
+
+// ══════════════════════════════════════
+//  COSMIC / SUPERNOVAE DRAWING
+// ══════════════════════════════════════
+function drawCosmicRing(cv,angle){
+ const S=cv.width,ctx=cv.getContext('2d');ctx.clearRect(0,0,S,S);
+ const cx=S/2,cy=S/2;
+ const grad=ctx.createConicGradient(angle,cx,cy);
+ ['#ff006e','#8338ec','#06b6d4','#34d399','#ffd700','#ff006e'].forEach((c,i)=>grad.addColorStop(i/5,c));
+ const lw=5,m=4,rd=36;ctx.strokeStyle=grad;ctx.lineWidth=lw;
+ ctx.beginPath();ctx.moveTo(m+rd,m);ctx.lineTo(S-m-rd,m);ctx.quadraticCurveTo(S-m,m,S-m,m+rd);ctx.lineTo(S-m,S-m-rd);ctx.quadraticCurveTo(S-m,S-m,S-m-rd,S-m);ctx.lineTo(m+rd,S-m);ctx.quadraticCurveTo(m,S-m,m,S-m-rd);ctx.lineTo(m,m+rd);ctx.quadraticCurveTo(m,m,m+rd,m);ctx.closePath();ctx.stroke();
+}
+function drawSupernovaeRing(cv,angle){
+ const S=cv.width,ctx=cv.getContext('2d');ctx.clearRect(0,0,S,S);
+ const cx=S/2,cy=S/2;
+ const grad=ctx.createConicGradient(angle,cx,cy);
+ ['#ff4500','#ff8c00','#ffd700','#ffff00','#ff8c00','#ff4500'].forEach((c,i)=>grad.addColorStop(i/5,c));
+ const lw=6,m=4,rd=36;ctx.strokeStyle=grad;ctx.lineWidth=lw;
+ ctx.beginPath();ctx.moveTo(m+rd,m);ctx.lineTo(S-m-rd,m);ctx.quadraticCurveTo(S-m,m,S-m,m+rd);ctx.lineTo(S-m,S-m-rd);ctx.quadraticCurveTo(S-m,S-m,S-m-rd,S-m);ctx.lineTo(m+rd,S-m);ctx.quadraticCurveTo(m,S-m,m,S-m-rd);ctx.lineTo(m,m+rd);ctx.quadraticCurveTo(m,m,m+rd,m);ctx.closePath();ctx.stroke();
+}
+function drawHalo(cv,r,g,b,phase,intensity){
+ const S=cv.width,cx=S/2,ctx=cv.getContext('2d');ctx.clearRect(0,0,S,S);
+ const pulse=0.5+0.5*Math.sin(phase);const a=intensity*(0.6+pulse*0.4);
+ const grd=ctx.createRadialGradient(cx,cx,S*0.15,cx,cx,cx);
+ grd.addColorStop(0,`rgba(${r},${g},${b},${(a*0.6).toFixed(2)})`);
+ grd.addColorStop(0.4,`rgba(${r},${g},${b},${(a*0.3).toFixed(2)})`);
+ grd.addColorStop(0.7,`rgba(${r},${g},${b},${(a*0.1).toFixed(2)})`);
+ grd.addColorStop(1,`rgba(${r},${g},${b},0)`);
+ ctx.fillStyle=grd;ctx.fillRect(0,0,S,S);
+}
+
+// ══════════════════════════════════════
+//  GRID CONSTANTS
+// ══════════════════════════════════════
+const GRID=5, SZ=0.75, RAD=0.14, DEPTH=0.06, GGAP=0.90, SAT_LIFT=0.08;
+
+// ══════════════════════════════════════
+//  THREE.JS SETUP
+// ══════════════════════════════════════
 const canvas = document.getElementById('c');
 const renderer = new THREE.WebGLRenderer({canvas, antialias: true});
 renderer.setClearColor(0x12131a);
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(50, 1, 0.1, 100);
-camera.position.set(0, 0, 8);
-
-scene.add(new THREE.AmbientLight(0xffffff, 0.6));
+scene.add(new THREE.AmbientLight(0xffffff, 0.8));
 
 function resize(){
-    const w = window.innerWidth, h = window.innerHeight;
-    renderer.setSize(w, h);
-    camera.aspect = w / h;
-    camera.updateProjectionMatrix();
+ const w=window.innerWidth,h=window.innerHeight;
+ renderer.setSize(w,h);camera.aspect=w/h;camera.updateProjectionMatrix();
+ // Calcul du Z pour que la grille tienne dans l'écran
+ const gridW = (GRID-1)*GGAP + SZ; // largeur totale de la grille
+ const gridH = (GRID-1)*GGAP + SZ; // hauteur totale
+ const pad = 1.15; // 15% de marge
+ const vFov = camera.fov * Math.PI / 180;
+ const hFov = 2 * Math.atan(Math.tan(vFov/2) * camera.aspect);
+ const zForW = (gridW * pad / 2) / Math.tan(hFov/2);
+ const zForH = (gridH * pad / 2) / Math.tan(vFov/2);
+ camera.position.z = Math.max(zForW, zForH);
 }
-resize();
-window.addEventListener('resize', resize);
+resize();window.addEventListener('resize',resize);
 
 // ══ Rounded rect shape ══
-function rrShape(w, h, r){
-    const s = new THREE.Shape(), hw = w/2, hh = h/2;
-    s.moveTo(-hw+r, -hh);
-    s.lineTo(hw-r, -hh);
-    s.quadraticCurveTo(hw, -hh, hw, -hh+r);
-    s.lineTo(hw, hh-r);
-    s.quadraticCurveTo(hw, hh, hw-r, hh);
-    s.lineTo(-hw+r, hh);
-    s.quadraticCurveTo(-hw, hh, -hw, hh-r);
-    s.lineTo(-hw, -hh+r);
-    s.quadraticCurveTo(-hw, -hh, -hw+r, -hh);
-    return s;
+function rrS(w,h,r){
+ const s=new THREE.Shape(),hw=w/2,hh=h/2;
+ s.moveTo(-hw+r,-hh);s.lineTo(hw-r,-hh);s.quadraticCurveTo(hw,-hh,hw,-hh+r);
+ s.lineTo(hw,hh-r);s.quadraticCurveTo(hw,hh,hw-r,hh);
+ s.lineTo(-hw+r,hh);s.quadraticCurveTo(-hw,hh,-hw,hh-r);
+ s.lineTo(-hw,-hh+r);s.quadraticCurveTo(-hw,-hh,-hw+r,-hh);return s;
 }
 
-// ══ Créer un carré 3D (extrudé) ══
-const GRID = 5;
-const SZ = 0.75, RAD = 0.14, DEPTH = 0.06, GAP = 0.90;
+// ══════════════════════════════════════
+//  SATELLITE (DOMINO) BUILDER
+// ══════════════════════════════════════
 
-function mkSquare(num){
-    const g = new THREE.Group();
-    const shape = rrShape(SZ, SZ, RAD);
-    const extGeo = new THREE.ExtrudeGeometry(shape, {depth: DEPTH, bevelEnabled: false});
-    extGeo.translate(0, 0, -DEPTH/2);
-
-    const faceMat = new THREE.MeshBasicMaterial({color: 0x0e0f18, transparent: true, opacity: 0.85});
-    const sideMat = new THREE.MeshBasicMaterial({color: 0x141520, transparent: true, opacity: 0.5});
-    const mesh = new THREE.Mesh(extGeo, [faceMat, sideMat]);
-    g.add(mesh);
-
-    const edges = new THREE.LineSegments(
-        new THREE.EdgesGeometry(extGeo, 15),
-        new THREE.LineBasicMaterial({color: 0xb4b4be, transparent: true, opacity: 0.35})
-    );
-    g.add(edges);
-
-    // Numéro en texture
-    if(num !== undefined){
-        const cv = document.createElement('canvas');
-        cv.width = 128; cv.height = 128;
-        const ctx = cv.getContext('2d');
-        ctx.fillStyle = 'rgba(180,190,210,0.75)';
-        ctx.font = 'bold 52px -apple-system, sans-serif';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText(String(num), 64, 64);
-        const tex = new THREE.CanvasTexture(cv);
-        const label = new THREE.Mesh(
-            new THREE.PlaneGeometry(SZ * 0.8, SZ * 0.8),
-            new THREE.MeshBasicMaterial({map: tex, transparent: true, depthWrite: false})
-        );
-        label.position.z = DEPTH / 2 + 0.002;
-        g.add(label);
-    }
-
-    g.userData = {edges};
-    return g;
+function mkSat(){
+ const g=new THREE.Group();
+ // Face texture plane
+ const n=new THREE.Mesh(new THREE.PlaneGeometry(SZ,SZ),new THREE.MeshBasicMaterial({transparent:true,side:THREE.DoubleSide}));
+ n.position.z=DEPTH/2+0.001;g.add(n);
+ // Extruded body
+ const bg=new THREE.ExtrudeGeometry(rrS(SZ,SZ,RAD),{depth:DEPTH,bevelEnabled:false});bg.translate(0,0,-DEPTH/2);
+ g.add(new THREE.Mesh(bg,[new THREE.MeshBasicMaterial({color:0x0e0f18,transparent:true,opacity:0.3}),new THREE.MeshBasicMaterial({color:0x141520,transparent:true,opacity:0.45})]));
+ // Edges
+ const el=new THREE.LineSegments(new THREE.EdgesGeometry(bg,15),new THREE.LineBasicMaterial({color:0xb4b4be,transparent:true,opacity:0.15}));g.add(el);
+ // Shadow
+ const sc=document.createElement('canvas');sc.width=128;sc.height=128;const sx=sc.getContext('2d');
+ const sg=sx.createRadialGradient(64,64,10,64,64,60);sg.addColorStop(0,'rgba(0,0,0,0.3)');sg.addColorStop(0.5,'rgba(0,0,0,0.1)');sg.addColorStop(1,'rgba(0,0,0,0)');sx.fillStyle=sg;sx.fillRect(0,0,128,128);
+ const sm=new THREE.Mesh(new THREE.PlaneGeometry(SZ*1.2,SZ*1.2),new THREE.MeshBasicMaterial({map:new THREE.CanvasTexture(sc),transparent:true,opacity:0.45,depthWrite:false}));sm.position.z=-DEPTH/2-SAT_LIFT+0.005;g.add(sm);
+ // Glow
+ const gl=new THREE.Mesh(new THREE.ShapeGeometry(rrS(SZ+0.06,SZ+0.06,RAD+0.03)),new THREE.MeshBasicMaterial({color:0x7ec8e3,transparent:true,opacity:0}));gl.position.z=-DEPTH/2-0.005;g.add(gl);
+ // Ring (cosmic/supernovae border)
+ const rCv=document.createElement('canvas');rCv.width=256;rCv.height=256;
+ const rTex=new THREE.CanvasTexture(rCv);
+ const rMesh=new THREE.Mesh(new THREE.PlaneGeometry(SZ,SZ),new THREE.MeshBasicMaterial({map:rTex,transparent:true,opacity:0,depthWrite:false,side:THREE.DoubleSide}));
+ rMesh.position.z=DEPTH/2+0.003;g.add(rMesh);
+ // Halo sprite
+ const gCv=document.createElement('canvas');gCv.width=128;gCv.height=128;
+ const gTex=new THREE.CanvasTexture(gCv);
+ const gSpr=new THREE.Sprite(new THREE.SpriteMaterial({map:gTex,transparent:true,opacity:0,depthWrite:false}));
+ gSpr.scale.set(SZ*1.6,SZ*1.6,1);g.add(gSpr);
+ g.userData={numMesh:n,edgeLines:el,glowMesh:gl,ringCanvas:rCv,ringTex:rTex,ringMesh:rMesh,haloCanvas:gCv,haloTex:gTex,haloSprite:gSpr};
+ return g;
 }
 
-// ══ Grille 5x5 — chaque carré indépendant ══
-const squares = [];
-const gridGroup = new THREE.Group();
+// ══════════════════════════════════════
+//  DOMINO DATA & GRID
+// ══════════════════════════════════════
+const domData=[]; // {face1, face2, rotation, state} pour chaque case
+const squares=[];
+const gridGroup=new THREE.Group();
 scene.add(gridGroup);
 
-let num = 0;
-for(let row = 0; row < GRID; row++){
-    for(let col = 0; col < GRID; col++){
-        num++;
-        const sq = mkSquare(num);
-        const x = (col - 2) * GAP;
-        const y = (2 - row) * GAP;
-        sq.position.set(x, y, 0);
-        gridGroup.add(sq);
-        squares.push({mesh: sq, col, row, baseX: x, baseY: y});
-    }
+// Seed RNG
+function srand(seed){let s=seed;return()=>{s=(s*1103515245+12345)&0x7fffffff;return s/0x7fffffff;};}
+const rng=srand(42424);
+
+// Quelques états distribués pour le visuel
+const statePool=['white','white','white','white','white','white','white','white','white','white',
+ 'silver','silver','silver','gold','gold','emerald','emerald','cosmic','supernovae'];
+
+for(let row=0;row<GRID;row++){
+ for(let col=0;col<GRID;col++){
+  const idx=row*GRID+col;
+  const f1=BANK[Math.floor(rng()*BANK.length)];
+  const f2=BANK[Math.floor(rng()*BANK.length)];
+  const rot=((col+row)%2===0)?0:90;
+  const st=statePool[Math.floor(rng()*statePool.length)];
+  domData.push({face1:f1,face2:f2,rotation:rot,state:st});
+
+  const sat=mkSat();
+  const x=(col-2)*GGAP, y=(2-row)*GGAP;
+  sat.position.set(x,y,0);
+  gridGroup.add(sat);
+
+  // Apply texture
+  const tex=getDominoTex(f1,f2,rot,st);
+  sat.userData.numMesh.material.map=tex;
+  sat.userData.numMesh.material.needsUpdate=true;
+
+  squares.push({mesh:sat, col, row, baseX:x, baseY:y, domIdx:idx});
+ }
 }
 
-// ══ Étoiles (style ADAM) ══
+function updateSatTex(s){
+ const d=domData[s.domIdx];
+ const tex=getDominoTex(d.face1,d.face2,d.rotation,d.state);
+ s.mesh.userData.numMesh.material.map=tex;
+ s.mesh.userData.numMesh.material.needsUpdate=true;
+}
+
+// ══ Étoiles ══
 [
-    {n:60, d:[-6,-18], sp:1.5, sz:0.12, op:0.4, w:30},
-    {n:120, d:[-18,-40], sp:0.8, sz:0.07, op:0.2, w:45},
-    {n:200, d:[-40,-70], sp:0.3, sz:0.04, op:0.1, w:60}
-].forEach(c => {
-    const geo = new THREE.BufferGeometry();
-    const pos = new Float32Array(c.n * 3);
-    const spds = new Float32Array(c.n);
-    for(let i = 0; i < c.n; i++){
-        pos[i*3] = (Math.random()-0.5) * c.w;
-        pos[i*3+1] = (Math.random()-0.5) * c.w * 0.7;
-        pos[i*3+2] = c.d[0] + Math.random() * (c.d[1] - c.d[0]);
-        spds[i] = c.sp * (0.5 + Math.random());
-    }
-    geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-    const mat = new THREE.PointsMaterial({color: 0x7ec8e3, size: c.sz, transparent: true, opacity: c.op, depthWrite: false});
-    const pts = new THREE.Points(geo, mat);
-    scene.add(pts);
-    pts.userData = {spds, cfg: c, geo};
+ {n:60,d:[-6,-18],sp:1.5,sz:0.12,op:0.4,w:30},
+ {n:120,d:[-18,-40],sp:0.8,sz:0.07,op:0.2,w:45},
+ {n:200,d:[-40,-70],sp:0.3,sz:0.04,op:0.1,w:60}
+].forEach(c=>{
+ const geo=new THREE.BufferGeometry();
+ const pos=new Float32Array(c.n*3),spds=new Float32Array(c.n);
+ for(let i=0;i<c.n;i++){pos[i*3]=(Math.random()-0.5)*c.w;pos[i*3+1]=(Math.random()-0.5)*c.w*0.7;pos[i*3+2]=c.d[0]+Math.random()*(c.d[1]-c.d[0]);spds[i]=c.sp*(0.5+Math.random());}
+ geo.setAttribute('position',new THREE.BufferAttribute(pos,3));
+ const mat=new THREE.PointsMaterial({color:0x7ec8e3,size:c.sz,transparent:true,opacity:c.op,depthWrite:false});
+ const pts=new THREE.Points(geo,mat);scene.add(pts);
+ pts.userData={spds,cfg:c,geo};
 });
 
-// ══ Animation state ══
-let animating = false;
-let animAxis = ''; // 'h', 'v', 'd1' (↘↖), 'd2' (↙↗)
-let animDir = 0;
-let animTime = 0;
+// ══════════════════════════════════════
+//  ANIMATION (identique v1)
+// ══════════════════════════════════════
+let animating=false,animAxis='',animDir=0,animTime=0,isDiag=false;
+let activePairs=[],diagTargets=new Map();
+const DIAG_DURATION=0.55,DIAG_WAVE_DELAY=0.045,DIAG_ARC=1.0;
 
-function easeInOutQuart(t){
-    return t < 0.5 ? 8*t*t*t*t : 1 - Math.pow(-2*t+2, 4)/2;
+function easeInOutQuart(t){return t<0.5?8*t*t*t*t:1-Math.pow(-2*t+2,4)/2;}
+function getHVPairs(){return[{indices:[0,4],arc:1.5,delay:0.08,duration:0.65},{indices:[1,3],arc:0.8,delay:0.0,duration:0.50}];}
+
+function startAnim(axis,dir){
+ if(animating)return;animating=true;animAxis=axis;animDir=dir;animTime=0;
+ isDiag=(axis==='d1'||axis==='d2');
+ squares.forEach(s=>{s.startX=s.mesh.position.x;s.startY=s.mesh.position.y;s.startZ=0;});
+ if(isDiag){
+  diagTargets.clear();
+  function adiagOf(s){return axis==='d1'?(s.col+s.row):(s.col-s.row+4);}
+  const adiags={};squares.forEach(s=>{const k=adiagOf(s);if(!adiags[k])adiags[k]=[];adiags[k].push(s);});
+  for(const k in adiags)adiags[k].sort((a,b)=>a.col-b.col);
+  for(let k=0;k<=8;k++){const mk=8-k;if(k>=mk)continue;const lA=adiags[k]||[],lB=adiags[mk]||[];
+   for(let i=0;i<lA.length;i++){diagTargets.set(lA[i],{targetX:lB[i].startX,targetY:lB[i].startY,newCol:lB[i].col,newRow:lB[i].row,swapWith:lB[i]});diagTargets.set(lB[i],{targetX:lA[i].startX,targetY:lA[i].startY,newCol:lA[i].col,newRow:lA[i].row,swapWith:lA[i]});}}
+ } else {activePairs=getHVPairs();}
 }
 
-// ── H/V ──
-function getHVPairs(){
-    return [
-        {indices:[0,4], arc:1.5, delay:0.08, duration:0.65},
-        {indices:[1,3], arc:0.8, delay:0.0,  duration:0.50}
-    ];
-}
-
-let activePairs = [];
-let isDiag = false;
-
-// ── DIAG : pré-calcul des cibles ──
-// Chaque carré stocke sa cible (position monde + nouveau col/row)
-let diagTargets = new Map();
-// Délai par anti-diag index (0..8)
-const DIAG_DURATION = 0.55;
-const DIAG_WAVE_DELAY = 0.045; // délai entre chaque vague
-const DIAG_ARC = 1.0;
-
-function startAnim(axis, dir){
-    if(animating) return;
-    animating = true;
-    animAxis = axis;
-    animDir = dir;
-    animTime = 0;
-    isDiag = (axis === 'd1' || axis === 'd2');
-
-    squares.forEach(s => {
-        s.startX = s.mesh.position.x;
-        s.startY = s.mesh.position.y;
-        s.startZ = 0;
-    });
-
-    if(isDiag){
-        diagTargets.clear();
-
-        // Regrouper les carrés par anti-diag
-        // d1: anti-diag = col + row (axe ↘)
-        // d2: anti-diag = col + (4 - row) = col - row + 4 (axe ↗)
-        function adiagOf(s){
-            return axis === 'd1' ? (s.col + s.row) : (s.col - s.row + 4);
-        }
-
-        // Construire les listes par anti-diag
-        const adiags = {};
-        squares.forEach(s => {
-            const k = adiagOf(s);
-            if(!adiags[k]) adiags[k] = [];
-            adiags[k].push(s);
-        });
-
-        // Trier chaque anti-diag par position le long de la diag
-        // d1: trier par col croissant
-        // d2: trier par col croissant
-        for(const k in adiags){
-            adiags[k].sort((a, b) => a.col - b.col);
-        }
-
-        // Pour chaque anti-diag k, son miroir est 8-k
-        // Le bloc en position relative i de la diag k va à la position relative i de la diag 8-k
-        for(let k = 0; k <= 8; k++){
-            const mk = 8 - k;
-            if(k === mk) continue; // diag centrale, ne bouge pas
-            if(k > mk) continue;   // déjà traité dans l'autre sens
-            const listA = adiags[k] || [];
-            const listB = adiags[mk] || [];
-            // Les deux listes ont la même longueur
-            for(let i = 0; i < listA.length; i++){
-                const sa = listA[i];
-                const sb = listB[i];
-                diagTargets.set(sa, {
-                    targetX: sb.startX, targetY: sb.startY,
-                    newCol: sb.col, newRow: sb.row
-                });
-                diagTargets.set(sb, {
-                    targetX: sa.startX, targetY: sa.startY,
-                    newCol: sa.col, newRow: sa.row
-                });
-            }
-        }
-    } else {
-        activePairs = getHVPairs();
-    }
-}
-
-function getDiagDelay(s){
-    // Vague par anti-diag, dans le sens du swipe
-    let k;
-    if(animAxis === 'd1') k = s.col + s.row;
-    else k = s.col - s.row + 4;
-    // Sens du swipe: dir=+1 (↘ ou ↗) → la diag 0 part en premier
-    // dir=-1 (↖ ou ↙) → la diag 8 part en premier
-    const wave = (animDir === 1) ? k : (8 - k);
-    return wave * DIAG_WAVE_DELAY;
-}
+function getDiagDelay(s){let k=animAxis==='d1'?(s.col+s.row):(s.col-s.row+4);return((animDir===1)?k:(8-k))*DIAG_WAVE_DELAY;}
 
 function updateAnim(dt){
-    if(!animating) return;
-    animTime += dt;
-    let allDone = true;
-
-    if(isDiag){
-        squares.forEach(s => {
-            const tgt = diagTargets.get(s);
-            if(!tgt) return; // diag centrale
-
-            const delay = getDiagDelay(s);
-            const localTime = animTime - delay;
-            if(localTime < 0){ allDone = false; return; }
-
-            const t = Math.min(localTime / DIAG_DURATION, 1);
-            if(t < 1) allDone = false;
-            const e = easeInOutQuart(t);
-
-            // Dessus/dessous: le bloc qui va dans le sens du swipe passe au-dessus
-            let k = (animAxis === 'd1') ? (s.col + s.row) : (s.col - s.row + 4);
-            const goesForward = (animDir === 1) ? (k < 4) : (k > 4);
-            const zSign = goesForward ? 1 : -1;
-            const arc = Math.sin(e * Math.PI) * DIAG_ARC * zSign;
-
-            s.mesh.position.x = s.startX + (tgt.targetX - s.startX) * e;
-            s.mesh.position.y = s.startY + (tgt.targetY - s.startY) * e;
-            s.mesh.position.z = arc;
-        });
-
-        if(allDone){
-            squares.forEach(s => {
-                const tgt = diagTargets.get(s);
-                if(!tgt) return;
-                s.mesh.position.z = 0;
-                s.baseX = s.mesh.position.x;
-                s.baseY = s.mesh.position.y;
-                s.col = tgt.newCol;
-                s.row = tgt.newRow;
-            });
-            animating = false;
-        }
-    } else {
-        // H / V
-        squares.forEach(s => {
-            const idx = animAxis === 'h' ? s.col : s.row;
-            let pi = -1;
-            for(let p = 0; p < activePairs.length; p++){
-                const pr = activePairs[p];
-                if(idx === pr.indices[0] || idx === pr.indices[1]){ pi = p; break; }
-            }
-            if(pi < 0) return;
-
-            const pr = activePairs[pi];
-            const localTime = animTime - pr.delay;
-            if(localTime < 0){ allDone = false; return; }
-
-            const t = Math.min(localTime / pr.duration, 1);
-            if(t < 1) allDone = false;
-            const e = easeInOutQuart(t);
-
-            const [a, b] = pr.indices;
-            const isOver = (animDir === 1) ? (idx === b) : (idx === a);
-            const zSign = isOver ? 1 : -1;
-            const arc = Math.sin(e * Math.PI) * pr.arc * zSign;
-
-            if(animAxis === 'h'){
-                const targetX = -s.startX;
-                s.mesh.position.x = s.startX + (targetX - s.startX) * e;
-                s.mesh.position.z = arc;
-            } else {
-                const targetY = -s.startY;
-                s.mesh.position.y = s.startY + (targetY - s.startY) * e;
-                s.mesh.position.z = arc;
-            }
-        });
-
-        if(allDone){
-            squares.forEach(s => {
-                const idx = animAxis === 'h' ? s.col : s.row;
-                let pi = -1;
-                for(let p = 0; p < activePairs.length; p++){
-                    const pr = activePairs[p];
-                    if(idx === pr.indices[0] || idx === pr.indices[1]){ pi = p; break; }
-                }
-                if(pi < 0) return;
-                s.mesh.position.z = 0;
-                const [a, b] = activePairs[pi].indices;
-                if(animAxis === 'h'){
-                    s.baseX = s.mesh.position.x;
-                    s.col = (s.col === a) ? b : a;
-                } else {
-                    s.baseY = s.mesh.position.y;
-                    s.row = (s.row === a) ? b : a;
-                }
-            });
-            animating = false;
-        }
-    }
+ if(!animating)return;animTime+=dt;let allDone=true;
+ if(isDiag){
+  squares.forEach(s=>{const tgt=diagTargets.get(s);if(!tgt)return;
+   const delay=getDiagDelay(s),lt=animTime-delay;if(lt<0){allDone=false;return;}
+   const t=Math.min(lt/DIAG_DURATION,1);if(t<1)allDone=false;const e=easeInOutQuart(t);
+   let k=(animAxis==='d1')?(s.col+s.row):(s.col-s.row+4);
+   const zSign=((animDir===1)?(k<4):(k>4))?1:-1;
+   const arc=Math.sin(e*Math.PI)*DIAG_ARC*zSign;
+   s.mesh.position.x=s.startX+(tgt.targetX-s.startX)*e;
+   s.mesh.position.y=s.startY+(tgt.targetY-s.startY)*e;
+   s.mesh.position.z=arc;
+  });
+  if(allDone){
+   squares.forEach(s=>{const tgt=diagTargets.get(s);if(!tgt)return;
+    s.mesh.position.z=0;
+    s.baseX=s.mesh.position.x;s.baseY=s.mesh.position.y;
+    s.col=tgt.newCol;s.row=tgt.newRow;
+   });animating=false;
+  }
+ } else {
+  squares.forEach(s=>{
+   const idx=animAxis==='h'?s.col:s.row;let pi=-1;
+   for(let p=0;p<activePairs.length;p++){const pr=activePairs[p];if(idx===pr.indices[0]||idx===pr.indices[1]){pi=p;break;}}
+   if(pi<0)return;const pr=activePairs[pi],lt=animTime-pr.delay;
+   if(lt<0){allDone=false;return;}const t=Math.min(lt/pr.duration,1);if(t<1)allDone=false;
+   const e=easeInOutQuart(t);const[a,b]=pr.indices;
+   const isOver=(animDir===1)?(idx===b):(idx===a);const arc=Math.sin(e*Math.PI)*pr.arc*(isOver?1:-1);
+   if(animAxis==='h'){s.mesh.position.x=s.startX+(-s.startX-s.startX)*e;s.mesh.position.z=arc;}
+   else{s.mesh.position.y=s.startY+(-s.startY-s.startY)*e;s.mesh.position.z=arc;}
+  });
+  if(allDone){
+   squares.forEach(s=>{
+    const idx=animAxis==='h'?s.col:s.row;let pi=-1;
+    for(let p=0;p<activePairs.length;p++){const pr=activePairs[p];if(idx===pr.indices[0]||idx===pr.indices[1]){pi=p;break;}}
+    if(pi<0)return;
+    s.mesh.position.z=0;
+    const[a,b]=activePairs[pi].indices;
+    if(animAxis==='h'){s.baseX=s.mesh.position.x;s.col=(s.col===a)?b:a;}
+    else{s.baseY=s.mesh.position.y;s.row=(s.row===a)?b:a;}
+   });animating=false;
+  }
+ }
 }
 
 // ══ Pointer / swipe ══
-let pStart = null;
-window.addEventListener('pointerdown', e => {
-    if(animating) return;
-    pStart = {x: e.clientX, y: e.clientY};
+let pStart=null;
+window.addEventListener('pointerdown',e=>{if(animating)return;pStart={x:e.clientX,y:e.clientY};});
+window.addEventListener('pointerup',e=>{
+ if(!pStart||animating)return;const dx=e.clientX-pStart.x,dy=e.clientY-pStart.y;
+ if(Math.hypot(dx,dy)<40){pStart=null;return;}
+ const deg=((Math.atan2(dy,dx)*180/Math.PI)+360)%360;
+ if(deg<22.5||deg>=337.5)startAnim('h',1);
+ else if(deg<67.5)startAnim('d1',1);
+ else if(deg<112.5)startAnim('v',1);
+ else if(deg<157.5)startAnim('d2',-1);
+ else if(deg<202.5)startAnim('h',-1);
+ else if(deg<247.5)startAnim('d1',-1);
+ else if(deg<292.5)startAnim('v',-1);
+ else startAnim('d2',1);
+ pStart=null;
 });
-window.addEventListener('pointerup', e => {
-    if(!pStart || animating) return;
-    const dx = e.clientX - pStart.x;
-    const dy = e.clientY - pStart.y;
-    const dist = Math.hypot(dx, dy);
-    if(dist < 40){ pStart = null; return; }
-
-    const angle = Math.atan2(dy, dx);
-    const deg = ((angle * 180 / Math.PI) + 360) % 360;
-
-    if(deg < 22.5 || deg >= 337.5)        startAnim('h', 1);   // →
-    else if(deg < 67.5)                    startAnim('d1', 1);  // ↘
-    else if(deg < 112.5)                   startAnim('v', 1);   // ↓
-    else if(deg < 157.5)                   startAnim('d2', -1); // ↙
-    else if(deg < 202.5)                   startAnim('h', -1);  // ←
-    else if(deg < 247.5)                   startAnim('d1', -1); // ↖
-    else if(deg < 292.5)                   startAnim('v', -1);  // ↑
-    else                                    startAnim('d2', 1);  // ↗
-
-    pStart = null;
-});
-window.addEventListener('pointercancel', () => { pStart = null; });
-
-// Clavier
-document.addEventListener('keydown', e => {
-    if(e.key === 'ArrowRight')  startAnim('h', 1);
-    else if(e.key === 'ArrowLeft')  startAnim('h', -1);
-    else if(e.key === 'ArrowDown')  startAnim('v', 1);
-    else if(e.key === 'ArrowUp')    startAnim('v', -1);
+window.addEventListener('pointercancel',()=>{pStart=null;});
+document.addEventListener('keydown',e=>{
+ if(e.key==='ArrowRight')startAnim('h',1);else if(e.key==='ArrowLeft')startAnim('h',-1);
+ else if(e.key==='ArrowDown')startAnim('v',1);else if(e.key==='ArrowUp')startAnim('v',-1);
 });
 
-// ══ Render loop ══
-const clock = new THREE.Clock();
+// ══════════════════════════════════════
+//  RENDER LOOP
+// ══════════════════════════════════════
+const clock=new THREE.Clock();
 function animate(){
-    requestAnimationFrame(animate);
-    const dt = clock.getDelta();
-    const t = clock.getElapsedTime();
+ requestAnimationFrame(animate);
+ const dt=clock.getDelta(),t=clock.getElapsedTime();
+ updateAnim(dt);
 
-    updateAnim(dt);
+ // State-based visual effects
+ squares.forEach((s,si)=>{
+  const d=domData[s.domIdx],st=d.state,ud=s.mesh.userData;
+  if(st==='cosmic'){
+   drawCosmicRing(ud.ringCanvas,t*Math.PI/2);ud.ringTex.needsUpdate=true;ud.ringMesh.material.opacity=1;
+   drawHalo(ud.haloCanvas,131,56,236,t*Math.PI,0.5);ud.haloTex.needsUpdate=true;ud.haloSprite.material.opacity=0.8;
+   const cp=t*1.5+si;ud.edgeLines.material.color.setRGB(0.5+Math.sin(cp)*0.3,Math.sin(cp+2.1)*0.3+0.2,0.5+Math.sin(cp+4.2)*0.3);ud.edgeLines.material.opacity=0.5+Math.sin(t*2)*0.15;
+   ud.glowMesh.material.color.set(0x8338ec);ud.glowMesh.material.opacity=0.2+0.12*Math.sin(t*2+si);
+  } else if(st==='supernovae'){
+   drawSupernovaeRing(ud.ringCanvas,t*Math.PI*2/3);ud.ringTex.needsUpdate=true;ud.ringMesh.material.opacity=1;
+   drawHalo(ud.haloCanvas,255,140,0,t*Math.PI*1.25,0.6);ud.haloTex.needsUpdate=true;ud.haloSprite.material.opacity=0.9;
+   ud.edgeLines.material.color.setRGB(1,0.4+Math.sin(t*2+si)*0.3,Math.sin(t*1.5)*0.15);ud.edgeLines.material.opacity=0.5+Math.sin(t*2.5)*0.12;
+   ud.glowMesh.material.color.set(0xff8c00);ud.glowMesh.material.opacity=0.3+0.2*Math.sin(t*2.5+si);
+  } else if(st==='emerald'){
+   ud.ringMesh.material.opacity=0;
+   drawHalo(ud.haloCanvas,52,211,153,t*Math.PI*0.8,0.35);ud.haloTex.needsUpdate=true;ud.haloSprite.material.opacity=0.7;
+   ud.edgeLines.material.color.set(0x34d399);ud.edgeLines.material.opacity=0.3+0.1*Math.sin(t*1.5+si);
+   ud.glowMesh.material.color.set(0x34d399);ud.glowMesh.material.opacity=0.15+0.1*Math.sin(t*1.5+si);
+  } else if(st==='gold'){
+   ud.ringMesh.material.opacity=0;
+   drawHalo(ud.haloCanvas,255,215,0,t*Math.PI*0.6,0.25);ud.haloTex.needsUpdate=true;ud.haloSprite.material.opacity=0.5;
+   ud.edgeLines.material.color.set(0xffd700);ud.edgeLines.material.opacity=0.25+0.08*Math.sin(t*1.2+si);
+   ud.glowMesh.material.color.set(0xffd700);ud.glowMesh.material.opacity=0.08+0.05*Math.sin(t*1.2+si);
+  } else if(st==='silver'){
+   ud.ringMesh.material.opacity=0;
+   drawHalo(ud.haloCanvas,6,182,212,t*Math.PI*0.5,0.2);ud.haloTex.needsUpdate=true;ud.haloSprite.material.opacity=0.4;
+   ud.edgeLines.material.color.set(0x22d3ee);ud.edgeLines.material.opacity=0.2+0.06*Math.sin(t+si);
+   ud.glowMesh.material.color.set(0x06b6d4);ud.glowMesh.material.opacity=0.05+0.03*Math.sin(t+si);
+  } else {
+   ud.glowMesh.material.opacity=0;ud.ringMesh.material.opacity=0;ud.haloSprite.material.opacity=0;
+   ud.edgeLines.material.color.set(0xb4b4be);ud.edgeLines.material.opacity=0.12;
+  }
+ });
 
-    // Étoiles
-    scene.children.forEach(child => {
-        if(child.isPoints && child.userData.cfg){
-            const u = child.userData;
-            const p = u.geo.attributes.position.array;
-            for(let i = 0; i < u.cfg.n; i++){
-                p[i*3+2] += u.spds[i] * dt;
-                if(p[i*3+2] > u.cfg.d[0] + 5){
-                    p[i*3+2] = u.cfg.d[1];
-                    p[i*3] = (Math.random()-0.5) * u.cfg.w;
-                    p[i*3+1] = (Math.random()-0.5) * u.cfg.w * 0.7;
-                }
-            }
-            u.geo.attributes.position.needsUpdate = true;
-        }
-    });
-
-    // Subtile respiration des bords
-    squares.forEach(s => {
-        const phase = t * 1.2 + s.col * 1.5 + s.row * 0.8;
-        s.mesh.userData.edges.material.opacity = 0.25 + 0.1 * Math.sin(phase);
-    });
-
-    renderer.render(scene, camera);
+ // Étoiles
+ scene.children.forEach(child=>{
+  if(child.isPoints&&child.userData.cfg){
+   const u=child.userData,p=u.geo.attributes.position.array;
+   for(let i=0;i<u.cfg.n;i++){p[i*3+2]+=u.spds[i]*dt;if(p[i*3+2]>u.cfg.d[0]+5){p[i*3+2]=u.cfg.d[1];p[i*3]=(Math.random()-0.5)*u.cfg.w;p[i*3+1]=(Math.random()-0.5)*u.cfg.w*0.7;}}
+   u.geo.attributes.position.needsUpdate=true;
+  }
+ });
+ renderer.render(scene,camera);
 }
 animate();
 </script>
