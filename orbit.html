@@ -14,7 +14,7 @@ canvas{width:100vw;height:100vh;display:block}
 </head>
 <body>
 <canvas id="c"></canvas>
-<div class="hint">← → ↑ ↓ SWIPE 4 DIRECTIONS</div>
+<div class="hint">SWIPE 8 DIRECTIONS ↗ → ↘ ↓ ↙ ← ↖ ↑</div>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script>
 const canvas = document.getElementById('c');
@@ -56,7 +56,7 @@ function rrShape(w, h, r){
 const GRID = 5;
 const SZ = 0.75, RAD = 0.14, DEPTH = 0.06, GAP = 0.90;
 
-function mkSquare(){
+function mkSquare(num){
     const g = new THREE.Group();
     const shape = rrShape(SZ, SZ, RAD);
     const extGeo = new THREE.ExtrudeGeometry(shape, {depth: DEPTH, bevelEnabled: false});
@@ -73,6 +73,25 @@ function mkSquare(){
     );
     g.add(edges);
 
+    // Numéro en texture
+    if(num !== undefined){
+        const cv = document.createElement('canvas');
+        cv.width = 128; cv.height = 128;
+        const ctx = cv.getContext('2d');
+        ctx.fillStyle = 'rgba(180,190,210,0.75)';
+        ctx.font = 'bold 52px -apple-system, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(String(num), 64, 64);
+        const tex = new THREE.CanvasTexture(cv);
+        const label = new THREE.Mesh(
+            new THREE.PlaneGeometry(SZ * 0.8, SZ * 0.8),
+            new THREE.MeshBasicMaterial({map: tex, transparent: true, depthWrite: false})
+        );
+        label.position.z = DEPTH / 2 + 0.002;
+        g.add(label);
+    }
+
     g.userData = {edges};
     return g;
 }
@@ -82,9 +101,11 @@ const squares = [];
 const gridGroup = new THREE.Group();
 scene.add(gridGroup);
 
-for(let col = 0; col < GRID; col++){
-    for(let row = 0; row < GRID; row++){
-        const sq = mkSquare();
+let num = 0;
+for(let row = 0; row < GRID; row++){
+    for(let col = 0; col < GRID; col++){
+        num++;
+        const sq = mkSquare(num);
         const x = (col - 2) * GAP;
         const y = (2 - row) * GAP;
         sq.position.set(x, y, 0);
@@ -117,23 +138,32 @@ for(let col = 0; col < GRID; col++){
 
 // ══ Animation state ══
 let animating = false;
-let animAxis = ''; // 'h' ou 'v'
-let animDir = 0;   // h: +1=droite, -1=gauche / v: +1=bas, -1=haut
-const ANIM_DURATION = 0.7; // durée totale englobante
+let animAxis = ''; // 'h', 'v', 'd1' (↘↖), 'd2' (↙↗)
+let animDir = 0;
 let animTime = 0;
-
-// Paires d'échange: col/row 0↔4 (extérieures) et 1↔3 (intérieures)
-const PAIRS = [[0, 4], [1, 3]];
-const ARC_HEIGHT = [1.5, 0.8];
-// Déphasage: [delay, durée propre] — intérieure part en premier, extérieure suit
-const PAIR_TIMING = [
-    {delay: 0.08, duration: 0.65},  // extérieure: part un peu après, plus lente
-    {delay: 0.0,  duration: 0.50}   // intérieure: part tout de suite, plus rapide
-];
 
 function easeInOutQuart(t){
     return t < 0.5 ? 8*t*t*t*t : 1 - Math.pow(-2*t+2, 4)/2;
 }
+
+// ── H/V ──
+function getHVPairs(){
+    return [
+        {indices:[0,4], arc:1.5, delay:0.08, duration:0.65},
+        {indices:[1,3], arc:0.8, delay:0.0,  duration:0.50}
+    ];
+}
+
+let activePairs = [];
+let isDiag = false;
+
+// ── DIAG : pré-calcul des cibles ──
+// Chaque carré stocke sa cible (position monde + nouveau col/row)
+let diagTargets = new Map();
+// Délai par anti-diag index (0..8)
+const DIAG_DURATION = 0.55;
+const DIAG_WAVE_DELAY = 0.045; // délai entre chaque vague
+const DIAG_ARC = 1.0;
 
 function startAnim(axis, dir){
     if(animating) return;
@@ -141,73 +171,174 @@ function startAnim(axis, dir){
     animAxis = axis;
     animDir = dir;
     animTime = 0;
+    isDiag = (axis === 'd1' || axis === 'd2');
+
     squares.forEach(s => {
         s.startX = s.mesh.position.x;
         s.startY = s.mesh.position.y;
-        s.startZ = s.mesh.position.z;
+        s.startZ = 0;
     });
+
+    if(isDiag){
+        diagTargets.clear();
+
+        // Regrouper les carrés par anti-diag
+        // d1: anti-diag = col + row (axe ↘)
+        // d2: anti-diag = col + (4 - row) = col - row + 4 (axe ↗)
+        function adiagOf(s){
+            return axis === 'd1' ? (s.col + s.row) : (s.col - s.row + 4);
+        }
+
+        // Construire les listes par anti-diag
+        const adiags = {};
+        squares.forEach(s => {
+            const k = adiagOf(s);
+            if(!adiags[k]) adiags[k] = [];
+            adiags[k].push(s);
+        });
+
+        // Trier chaque anti-diag par position le long de la diag
+        // d1: trier par col croissant
+        // d2: trier par col croissant
+        for(const k in adiags){
+            adiags[k].sort((a, b) => a.col - b.col);
+        }
+
+        // Pour chaque anti-diag k, son miroir est 8-k
+        // Le bloc en position relative i de la diag k va à la position relative i de la diag 8-k
+        for(let k = 0; k <= 8; k++){
+            const mk = 8 - k;
+            if(k === mk) continue; // diag centrale, ne bouge pas
+            if(k > mk) continue;   // déjà traité dans l'autre sens
+            const listA = adiags[k] || [];
+            const listB = adiags[mk] || [];
+            // Les deux listes ont la même longueur
+            for(let i = 0; i < listA.length; i++){
+                const sa = listA[i];
+                const sb = listB[i];
+                diagTargets.set(sa, {
+                    targetX: sb.startX, targetY: sb.startY,
+                    newCol: sb.col, newRow: sb.row
+                });
+                diagTargets.set(sb, {
+                    targetX: sa.startX, targetY: sa.startY,
+                    newCol: sa.col, newRow: sa.row
+                });
+            }
+        }
+    } else {
+        activePairs = getHVPairs();
+    }
 }
 
-function getSwapInfo(idx){
-    for(let p = 0; p < PAIRS.length; p++){
-        if(idx === PAIRS[p][0] || idx === PAIRS[p][1]) return {pairIdx: p, pair: PAIRS[p]};
-    }
-    return null;
+function getDiagDelay(s){
+    // Vague par anti-diag, dans le sens du swipe
+    let k;
+    if(animAxis === 'd1') k = s.col + s.row;
+    else k = s.col - s.row + 4;
+    // Sens du swipe: dir=+1 (↘ ou ↗) → la diag 0 part en premier
+    // dir=-1 (↖ ou ↙) → la diag 8 part en premier
+    const wave = (animDir === 1) ? k : (8 - k);
+    return wave * DIAG_WAVE_DELAY;
 }
 
 function updateAnim(dt){
     if(!animating) return;
     animTime += dt;
-
     let allDone = true;
 
-    squares.forEach(s => {
-        const idx = animAxis === 'h' ? s.col : s.row;
-        const info = getSwapInfo(idx);
-        if(!info) return;
-
-        const timing = PAIR_TIMING[info.pairIdx];
-        const localTime = animTime - timing.delay;
-        if(localTime < 0){ allDone = false; return; } // pas encore démarré
-
-        const t = Math.min(localTime / timing.duration, 1);
-        if(t < 1) allDone = false;
-        const e = easeInOutQuart(t);
-
-        const [a, b] = info.pair;
-        const arcH = ARC_HEIGHT[info.pairIdx];
-        const isOver = (animDir === 1) ? (idx === b) : (idx === a);
-        const zSign = isOver ? 1 : -1;
-        const arc = Math.sin(e * Math.PI) * arcH * zSign;
-
-        if(animAxis === 'h'){
-            const targetX = -s.startX;
-            s.mesh.position.x = s.startX + (targetX - s.startX) * e;
-            s.mesh.position.z = arc;
-        } else {
-            const targetY = -s.startY;
-            s.mesh.position.y = s.startY + (targetY - s.startY) * e;
-            s.mesh.position.z = arc;
-        }
-    });
-
-    if(allDone){
+    if(isDiag){
         squares.forEach(s => {
-            s.mesh.position.z = 0;
-            const idx = animAxis === 'h' ? s.col : s.row;
-            const info = getSwapInfo(idx);
-            if(!info) return;
+            const tgt = diagTargets.get(s);
+            if(!tgt) return; // diag centrale
 
-            const [a, b] = info.pair;
-            if(animAxis === 'h'){
+            const delay = getDiagDelay(s);
+            const localTime = animTime - delay;
+            if(localTime < 0){ allDone = false; return; }
+
+            const t = Math.min(localTime / DIAG_DURATION, 1);
+            if(t < 1) allDone = false;
+            const e = easeInOutQuart(t);
+
+            // Dessus/dessous: le bloc qui va dans le sens du swipe passe au-dessus
+            let k = (animAxis === 'd1') ? (s.col + s.row) : (s.col - s.row + 4);
+            const goesForward = (animDir === 1) ? (k < 4) : (k > 4);
+            const zSign = goesForward ? 1 : -1;
+            const arc = Math.sin(e * Math.PI) * DIAG_ARC * zSign;
+
+            s.mesh.position.x = s.startX + (tgt.targetX - s.startX) * e;
+            s.mesh.position.y = s.startY + (tgt.targetY - s.startY) * e;
+            s.mesh.position.z = arc;
+        });
+
+        if(allDone){
+            squares.forEach(s => {
+                const tgt = diagTargets.get(s);
+                if(!tgt) return;
+                s.mesh.position.z = 0;
                 s.baseX = s.mesh.position.x;
-                s.col = (s.col === a) ? b : a;
-            } else {
                 s.baseY = s.mesh.position.y;
-                s.row = (s.row === a) ? b : a;
+                s.col = tgt.newCol;
+                s.row = tgt.newRow;
+            });
+            animating = false;
+        }
+    } else {
+        // H / V
+        squares.forEach(s => {
+            const idx = animAxis === 'h' ? s.col : s.row;
+            let pi = -1;
+            for(let p = 0; p < activePairs.length; p++){
+                const pr = activePairs[p];
+                if(idx === pr.indices[0] || idx === pr.indices[1]){ pi = p; break; }
+            }
+            if(pi < 0) return;
+
+            const pr = activePairs[pi];
+            const localTime = animTime - pr.delay;
+            if(localTime < 0){ allDone = false; return; }
+
+            const t = Math.min(localTime / pr.duration, 1);
+            if(t < 1) allDone = false;
+            const e = easeInOutQuart(t);
+
+            const [a, b] = pr.indices;
+            const isOver = (animDir === 1) ? (idx === b) : (idx === a);
+            const zSign = isOver ? 1 : -1;
+            const arc = Math.sin(e * Math.PI) * pr.arc * zSign;
+
+            if(animAxis === 'h'){
+                const targetX = -s.startX;
+                s.mesh.position.x = s.startX + (targetX - s.startX) * e;
+                s.mesh.position.z = arc;
+            } else {
+                const targetY = -s.startY;
+                s.mesh.position.y = s.startY + (targetY - s.startY) * e;
+                s.mesh.position.z = arc;
             }
         });
-        animating = false;
+
+        if(allDone){
+            squares.forEach(s => {
+                const idx = animAxis === 'h' ? s.col : s.row;
+                let pi = -1;
+                for(let p = 0; p < activePairs.length; p++){
+                    const pr = activePairs[p];
+                    if(idx === pr.indices[0] || idx === pr.indices[1]){ pi = p; break; }
+                }
+                if(pi < 0) return;
+                s.mesh.position.z = 0;
+                const [a, b] = activePairs[pi].indices;
+                if(animAxis === 'h'){
+                    s.baseX = s.mesh.position.x;
+                    s.col = (s.col === a) ? b : a;
+                } else {
+                    s.baseY = s.mesh.position.y;
+                    s.row = (s.row === a) ? b : a;
+                }
+            });
+            animating = false;
+        }
     }
 }
 
@@ -221,13 +352,21 @@ window.addEventListener('pointerup', e => {
     if(!pStart || animating) return;
     const dx = e.clientX - pStart.x;
     const dy = e.clientY - pStart.y;
-    const ax = Math.abs(dx), ay = Math.abs(dy);
+    const dist = Math.hypot(dx, dy);
+    if(dist < 40){ pStart = null; return; }
 
-    if(ax > ay && ax > 40){
-        startAnim('h', dx > 0 ? 1 : -1);
-    } else if(ay > ax && ay > 40){
-        startAnim('v', dy > 0 ? 1 : -1);
-    }
+    const angle = Math.atan2(dy, dx);
+    const deg = ((angle * 180 / Math.PI) + 360) % 360;
+
+    if(deg < 22.5 || deg >= 337.5)        startAnim('h', 1);   // →
+    else if(deg < 67.5)                    startAnim('d1', 1);  // ↘
+    else if(deg < 112.5)                   startAnim('v', 1);   // ↓
+    else if(deg < 157.5)                   startAnim('d2', -1); // ↙
+    else if(deg < 202.5)                   startAnim('h', -1);  // ←
+    else if(deg < 247.5)                   startAnim('d1', -1); // ↖
+    else if(deg < 292.5)                   startAnim('v', -1);  // ↑
+    else                                    startAnim('d2', 1);  // ↗
+
     pStart = null;
 });
 window.addEventListener('pointercancel', () => { pStart = null; });
