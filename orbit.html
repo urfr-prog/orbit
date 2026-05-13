@@ -111,7 +111,7 @@ function drawHalo(cv,r,g,b,phase,intensity){
 // ══════════════════════════════════════
 //  GRID CONSTANTS
 // ══════════════════════════════════════
-const GRID=5, SZ=0.75, RAD=0.14, DEPTH=0.06, GGAP=0.90, SAT_LIFT=0.08;
+const GRID=6, SZ=0.58, RAD=0.11, DEPTH=0.04, GGAP=0.70, SAT_LIFT=0.06;
 
 // ══════════════════════════════════════
 //  THREE.JS SETUP (identique v2)
@@ -131,7 +131,7 @@ function resize(){
  const w=window.innerWidth,h=window.innerHeight;
  renderer.setSize(w,h);camera.aspect=w/h;camera.updateProjectionMatrix();
 }
-camera.position.set(0, 0, 8);
+camera.position.set(0, 0, 6.5);
 resize();window.addEventListener('resize',resize);
 
 // ══ Rounded rect shape ══
@@ -164,7 +164,7 @@ function mkSat(){
  const gCv=document.createElement('canvas');gCv.width=128;gCv.height=128;
  const gTex=new THREE.CanvasTexture(gCv);
  const gSpr=new THREE.Sprite(new THREE.SpriteMaterial({map:gTex,transparent:true,opacity:0,depthWrite:false}));
- gSpr.scale.set(SZ*1.6,SZ*1.6,1);g.add(gSpr);
+ gSpr.scale.set(SZ*1.4,SZ*1.4,1);g.add(gSpr);
  g.userData={numMesh:n,edgeLines:el,glowMesh:gl,ringCanvas:rCv,ringTex:rTex,ringMesh:rMesh,haloCanvas:gCv,haloTex:gTex,haloSprite:gSpr};
  return g;
 }
@@ -180,8 +180,8 @@ scene.add(gridGroup);
 function srand(seed){let s=seed;return()=>{s=(s*1103515245+12345)&0x7fffffff;return s/0x7fffffff;};}
 const rng=srand(42424);
 
-const statePool=['white','white','white','white','white','white','white','white','white','white',
- 'silver','silver','silver','gold','gold','emerald','emerald','cosmic','supernovae'];
+const statePool=['white','white','white','white','white','white','white','white','white','white','white','white',
+ 'silver','silver','silver','silver','gold','gold','gold','emerald','emerald','cosmic','supernovae'];
 
 for(let row=0;row<GRID;row++){
  for(let col=0;col<GRID;col++){
@@ -193,7 +193,7 @@ for(let row=0;row<GRID;row++){
   domData.push({face1:f1,face2:f2,rotation:rot,state:st});
 
   const sat=mkSat();
-  const x=(col-2)*GGAP, y=(2-row)*GGAP;
+  const x=(col-2.5)*GGAP, y=(2.5-row)*GGAP;
   sat.position.set(x,y,0);
   gridGroup.add(sat);
 
