@@ -130,15 +130,8 @@ const pointerNDC = new THREE.Vector2();
 function resize(){
  const w=window.innerWidth,h=window.innerHeight;
  renderer.setSize(w,h);camera.aspect=w/h;camera.updateProjectionMatrix();
- const gridW = (GRID-1)*GGAP + SZ;
- const gridH = (GRID-1)*GGAP + SZ;
- const pad = 1.15;
- const vFov = camera.fov * Math.PI / 180;
- const hFov = 2 * Math.atan(Math.tan(vFov/2) * camera.aspect);
- const zForW = (gridW * pad / 2) / Math.tan(hFov/2);
- const zForH = (gridH * pad / 2) / Math.tan(vFov/2);
- camera.position.z = Math.max(zForW, zForH);
 }
+camera.position.set(0, 0, 8);
 resize();window.addEventListener('resize',resize);
 
 // ══ Rounded rect shape ══
@@ -259,21 +252,16 @@ function easeInOutQuart(t){return t<0.5?8*t*t*t*t:1-Math.pow(-2*t+2,4)/2;}
 let animItems=[];
 
 function finishAnim(){
- // Swap domIdx between mirror pairs
- // We stored pairs in animPairs
+ // Swap domIdx between mirror pairs — meshes return to their grid slot
  animPairs.forEach(([a,b])=>{
   const tmp=a.domIdx; a.domIdx=b.domIdx; b.domIdx=tmp;
  });
- // Finalize positions
+ // Reset all meshes to their fixed grid position and update textures
  animItems.forEach(item=>{
   const s=item.sq;
-  s.mesh.position.x=item.targetX;
-  s.mesh.position.y=item.targetY;
+  s.mesh.position.x=s.baseX;
+  s.mesh.position.y=s.baseY;
   s.mesh.position.z=0;
-  s.baseX=item.targetX;
-  s.baseY=item.targetY;
-  s.col=item.newCol;
-  s.row=item.newRow;
   updateSatTex(s);
  });
  animating=false;animItems=[];animPairs=[];
@@ -302,27 +290,26 @@ function updateAnim(dt){
 // ══════════════════════════════════════
 //  H/V LINE MIRROR
 // ══════════════════════════════════════
-function startLineMirror(originSq, axis, dir, count){
- if(animating||count<2)return;
+function startLineMirror(originSq, axis, dir){
+ if(animating)return;
 
- // Build the line of dominos from origin in the swipe direction
+ const LINE_COUNT=4; // Toujours exactement 4 dominos
  const lineSqs=[];
  let col=originSq.col, row=originSq.row;
  let dc=0, dr=0;
  if(axis==='h'){ dc=dir; }
  else { dr=dir; }
 
- for(let i=0;i<count;i++){
+ for(let i=0;i<LINE_COUNT;i++){
   const c=col+dc*i, r=row+dr*i;
   if(c<0||c>=GRID||r<0||r>=GRID)break;
   const sq=squares.find(s=>s.col===c&&s.row===r);
   if(sq) lineSqs.push(sq);
  }
 
- if(lineSqs.length<2)return;
+ if(lineSqs.length<LINE_COUNT)return; // Pas assez de place → annuler
  const n=lineSqs.length;
 
- // Mirror: first ↔ last, second ↔ second-to-last, etc.
  animating=true;animTime=0;animItems=[];animPairs=[];
 
  for(let i=0;i<Math.floor(n/2);i++){
@@ -330,29 +317,27 @@ function startLineMirror(originSq, axis, dir, count){
   const waveDelay=i*0.04;
 
   animItems.push({
-   sq:a, startX:a.mesh.position.x, startY:a.mesh.position.y,
-   targetX:b.mesh.position.x, targetY:b.mesh.position.y,
-   newCol:b.col, newRow:b.row, arcSign:1, delay:waveDelay
+   sq:a, startX:a.baseX, startY:a.baseY,
+   targetX:b.baseX, targetY:b.baseY,
+   arcSign:1, delay:waveDelay
   });
   animItems.push({
-   sq:b, startX:b.mesh.position.x, startY:b.mesh.position.y,
-   targetX:a.mesh.position.x, targetY:a.mesh.position.y,
-   newCol:a.col, newRow:a.row, arcSign:-1, delay:waveDelay
+   sq:b, startX:b.baseX, startY:b.baseY,
+   targetX:a.baseX, targetY:a.baseY,
+   arcSign:-1, delay:waveDelay
   });
   animPairs.push([a,b]);
  }
- // Middle element (odd count) stays put — no animation needed
 }
 
 // ══════════════════════════════════════
 //  DIAGONAL LOCAL FLIP (NxN)
 // ══════════════════════════════════════
 function startLocalDiag(originSq, axis, dir, size){
- if(animating||size<2)return;
+ if(animating||size<3)return;
 
  let anchorCol=originSq.col, anchorRow=originSq.row;
 
- // Direction d'extension
  let colDir,rowDir;
  if(axis==='d1'&&dir===1){colDir=1;rowDir=1;}
  else if(axis==='d1'&&dir===-1){colDir=-1;rowDir=-1;}
@@ -364,7 +349,6 @@ function startLocalDiag(originSq, axis, dir, size){
  let minCol=Math.min(c0,c1),maxCol=Math.max(c0,c1);
  let minRow=Math.min(r0,r1),maxRow=Math.max(r0,r1);
 
- // Clamp — décale si dépasse
  if(minCol<0){maxCol+=(-minCol);minCol=0;}
  if(minRow<0){maxRow+=(-minRow);minRow=0;}
  if(maxCol>GRID-1){minCol-=(maxCol-(GRID-1));maxCol=GRID-1;}
@@ -378,10 +362,8 @@ function startLocalDiag(originSq, axis, dir, size){
  maxCol=minCol+zoneSize-1;
  maxRow=minRow+zoneSize-1;
 
- // Collect zone squares
  const zoneSqs=squares.filter(s=>s.col>=minCol&&s.col<=maxCol&&s.row>=minRow&&s.row<=maxRow);
 
- // Anti-diagonal grouping within zone
  function adiagOf(s){
   const lc=s.col-minCol,lr=s.row-minRow;
   return axis==='d1'?(lc+lr):(lc-lr+(zoneSize-1));
@@ -401,14 +383,14 @@ function startLocalDiag(originSq, axis, dir, size){
   for(let i=0;i<Math.min(lA.length,lB.length);i++){
    const a=lA[i],b=lB[i];
    animItems.push({
-    sq:a, startX:a.mesh.position.x, startY:a.mesh.position.y,
-    targetX:b.mesh.position.x, targetY:b.mesh.position.y,
-    newCol:b.col, newRow:b.row, arcSign:1, delay:waveDelay
+    sq:a, startX:a.baseX, startY:a.baseY,
+    targetX:b.baseX, targetY:b.baseY,
+    arcSign:1, delay:waveDelay
    });
    animItems.push({
-    sq:b, startX:b.mesh.position.x, startY:b.mesh.position.y,
-    targetX:a.mesh.position.x, targetY:a.mesh.position.y,
-    newCol:a.col, newRow:a.row, arcSign:-1, delay:waveDelay
+    sq:b, startX:b.baseX, startY:b.baseY,
+    targetX:a.baseX, targetY:a.baseY,
+    arcSign:-1, delay:waveDelay
    });
    animPairs.push([a,b]);
   }
@@ -416,59 +398,49 @@ function startLocalDiag(originSq, axis, dir, size){
 }
 
 // ══════════════════════════════════════
-//  POINTER / SWIPE — survol tracking
+//  POINTER / SWIPE
 // ══════════════════════════════════════
-let pStart=null,startSq=null,swipePath=[];
+let pStart=null,startSq=null;
 
 window.addEventListener('pointerdown',e=>{
  if(animating)return;
  pStart={x:e.clientX,y:e.clientY};
  startSq=hitTest(e.clientX,e.clientY);
- swipePath=[];
- if(startSq)swipePath.push({col:startSq.col,row:startSq.row});
-});
-
-window.addEventListener('pointermove',e=>{
- if(!pStart||animating||!startSq)return;
- const sq=hitTest(e.clientX,e.clientY);
- if(sq){
-  const last=swipePath[swipePath.length-1];
-  if(!last||sq.col!==last.col||sq.row!==last.row){
-   if(!swipePath.some(p=>p.col===sq.col&&p.row===sq.row)){
-    swipePath.push({col:sq.col,row:sq.row});
-   }
-  }
- }
 });
 
 window.addEventListener('pointerup',e=>{
  if(!pStart||animating)return;
  const dx=e.clientX-pStart.x,dy=e.clientY-pStart.y;
  const dist=Math.hypot(dx,dy);
- if(dist<30||!startSq){pStart=null;startSq=null;swipePath=[];return;}
+ if(dist<25||!startSq){pStart=null;startSq=null;return;}
 
+ // Determine axis from angle
  const deg=((Math.atan2(dy,dx)*180/Math.PI)+360)%360;
  let axis,dir;
  if(deg<22.5||deg>=337.5){axis='h';dir=1;}
  else if(deg<67.5){axis='d1';dir=1;}
  else if(deg<112.5){axis='v';dir=1;}
- else if(deg<157.5){axis='d2';dir=-1;}
+ else if(deg<157.5){axis='d2';dir=1;}
  else if(deg<202.5){axis='h';dir=-1;}
  else if(deg<247.5){axis='d1';dir=-1;}
  else if(deg<292.5){axis='v';dir=-1;}
- else {axis='d2';dir=1;}
-
- const count=Math.max(2,Math.min(GRID,swipePath.length));
+ else {axis='d2';dir=-1;}
 
  if(axis==='d1'||axis==='d2'){
+  // Calculate count from pixel distance for diagonals
+  const v0 = new THREE.Vector3(0, 0, 0).project(camera);
+  const v1 = new THREE.Vector3(GGAP, 0, 0).project(camera);
+  const cellPx = Math.abs(v1.x - v0.x) * window.innerWidth / 2;
+  const stepPx = cellPx * Math.SQRT2;
+  const count = Math.max(3, Math.min(GRID, Math.floor(dist / stepPx) + 1));
   startLocalDiag(startSq,axis,dir,count);
  } else {
-  startLineMirror(startSq,axis,dir,count);
+  startLineMirror(startSq,axis,dir);
  }
- pStart=null;startSq=null;swipePath=[];
+ pStart=null;startSq=null;
 });
 
-window.addEventListener('pointercancel',()=>{pStart=null;startSq=null;swipePath=[];});
+window.addEventListener('pointercancel',()=>{pStart=null;startSq=null;});
 
 // Clavier pour debug
 document.addEventListener('keydown',e=>{
